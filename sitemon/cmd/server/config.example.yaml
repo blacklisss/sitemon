@@ -1,0 +1,6 @@
+notification:
+  BotAPI: ""
+  ChatId: 12345
+domains:
+  - https://example.com
+  - https://example.ru
