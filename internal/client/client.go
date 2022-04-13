@@ -15,6 +15,7 @@ import (
 var m = make(map[string]*model.Resp)
 
 type Client struct {
+	sync.RWMutex
 	C           http.Client
 	Notificator notification.Notificator
 	Logger      *logrus.Logger
@@ -30,10 +31,13 @@ func NewClient(log *logrus.Logger, notificator notification.Notificator) *Client
 	}
 }
 
-func (c *Client) GetHeaders(ctx context.Context, url string, cancel context.CancelFunc, wg *sync.WaitGroup) error {
+func (c *Client) GetHeaders(ctx context.Context, url string, wg *sync.WaitGroup) error {
 
 	go func() {
-		defer wg.Done()
+		defer func() {
+			wg.Done()
+		}()
+
 		c.Logger.Infoln("Start checking ", url)
 		ticker := time.NewTicker(5 * time.Second)
 
@@ -44,14 +48,14 @@ func (c *Client) GetHeaders(ctx context.Context, url string, cancel context.Canc
 			c.Logger.Fatalln("cannot create request")
 		}
 
+	L:
 		for {
 			select {
 			case <-ctx.Done():
-				cancel()
-				c.Logger.Warnln("canceling...")
-				return
+				c.Logger.Warnln("exiting...")
+				break L
 			case t := <-ticker.C:
-				ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+				ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 
 				req = req.WithContext(ctx)
 
@@ -59,6 +63,7 @@ func (c *Client) GetHeaders(ctx context.Context, url string, cancel context.Canc
 
 				res, err := c.C.Do(req)
 				if err != nil {
+					cancel()
 					c.Logger.Errorln("cannot do request")
 					resp.ResponseCode = 503
 					resp.ContentLength = 0
@@ -78,11 +83,12 @@ func (c *Client) GetHeaders(ctx context.Context, url string, cancel context.Canc
 					resp.ContentLength = b*/
 				}
 
+				c.Lock()
 				m[url] = resp
+				c.Unlock()
 
-				ok, err := CheckRespStatus(url)
+				ok, err := c.CheckRespStatus(url)
 				if err != nil {
-					cancel()
 					c.Logger.Errorln(err)
 					continue
 				}
@@ -122,34 +128,38 @@ func (c *Client) GetHeaders(ctx context.Context, url string, cancel context.Canc
 						}
 					}
 				}*/
-
+				c.Lock()
 				m[url] = resp
-
+				c.Unlock()
 			}
 		}
-
 	}()
 
 	return nil
 }
 
-func CheckRespStatus(url string) (bool, error) {
+func (c *Client) CheckRespStatus(url string) (bool, error) {
+	c.RLock()
 	if _, ok := m[url]; !ok {
 		return false, fmt.Errorf("cannot get url: %s from map", url)
 	}
 
 	resp := m[url]
+	c.RUnlock()
 
 	return resp.ResponseCode == http.StatusOK, nil
 }
 
-func CheckRespContentLength(url string) (bool, error) {
+func (c *Client) CheckRespContentLength(url string) (bool, error) {
+	c.RLock()
 	if _, ok := m[url]; !ok {
 		return false, fmt.Errorf("cannot get url: %s from map", url)
 	}
+	resp := m[url]
+	c.RUnlock()
 
 	ret := true
-	resp := m[url]
+
 	if resp.OldContentLength == -1 {
 		resp.OldContentLength = resp.ContentLength
 	}
@@ -159,7 +169,9 @@ func CheckRespContentLength(url string) (bool, error) {
 		resp.OldContentLength = resp.ContentLength
 	}
 
+	c.Lock()
 	m[url] = resp
+	c.Unlock()
 
 	return ret, nil
 }

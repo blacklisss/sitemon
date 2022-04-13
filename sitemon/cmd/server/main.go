@@ -41,7 +41,7 @@ func main() {
 
 	for _, d := range cfg.Domains {
 		wg.Add(1)
-		if err := client.GetHeaders(ctx, d, cancel, &wg); err != nil {
+		if err := client.GetHeaders(ctx, d, &wg); err != nil {
 			log.Fatalln(err)
 		}
 	}
