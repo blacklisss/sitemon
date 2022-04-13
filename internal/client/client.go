@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"site_monitoring/internal/model"
 	"site_monitoring/internal/notification"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -29,9 +30,10 @@ func NewClient(log *logrus.Logger, notificator notification.Notificator) *Client
 	}
 }
 
-func (c *Client) GetHeaders(ctx context.Context, url string) error {
+func (c *Client) GetHeaders(ctx context.Context, url string, cancel context.CancelFunc, wg *sync.WaitGroup) error {
 
 	go func() {
+		defer wg.Done()
 		c.Logger.Infoln("Start checking ", url)
 		ticker := time.NewTicker(5 * time.Second)
 
@@ -45,7 +47,9 @@ func (c *Client) GetHeaders(ctx context.Context, url string) error {
 		for {
 			select {
 			case <-ctx.Done():
-				c.Logger.Warnln("Timeout")
+				cancel()
+				c.Logger.Warnln("canceling...")
+				return
 			case t := <-ticker.C:
 				ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 

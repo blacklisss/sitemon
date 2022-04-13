@@ -8,6 +8,7 @@ import (
 	client2 "site_monitoring/internal/client"
 	"site_monitoring/internal/notification"
 	"site_monitoring/sitemon/config"
+	"sync"
 
 	"github.com/sirupsen/logrus"
 )
@@ -36,15 +37,19 @@ func main() {
 	client := client2.NewClient(log, bot)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	var wg sync.WaitGroup
 
 	for _, d := range cfg.Domains {
-		if err := client.GetHeaders(ctx, d); err != nil {
+		wg.Add(1)
+		if err := client.GetHeaders(ctx, d, cancel, &wg); err != nil {
 			log.Fatalln(err)
 		}
 	}
 
 	<-ctx.Done()
 	cancel()
+
+	wg.Wait()
 
 	fmt.Println("")
 	log.Println("Service stopped...")
