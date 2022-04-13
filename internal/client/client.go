@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"site_monitoring/internal/model"
 	"site_monitoring/internal/notification"
@@ -61,7 +60,7 @@ func (c *Client) GetHeaders(ctx context.Context, url string) error {
 					resp.ContentLength = 0
 				} else {
 					resp.ResponseCode = res.StatusCode
-					b, err := io.Copy(io.Discard, res.Body)
+					/*b, err := io.Copy(io.Discard, res.Body)
 					if err != nil {
 						cancel()
 						c.Logger.Errorln("cannot get content-length")
@@ -72,7 +71,7 @@ func (c *Client) GetHeaders(ctx context.Context, url string) error {
 						cancel()
 						c.Logger.Fatalln("cannot close resp.Body")
 					}
-					resp.ContentLength = b
+					resp.ContentLength = b*/
 				}
 
 				m[url] = resp
@@ -103,7 +102,7 @@ func (c *Client) GetHeaders(ctx context.Context, url string) error {
 					if err != nil {
 						logrus.Errorln("cannot send tg message about server status")
 					}
-				} else if ok {
+				} /*else if ok {
 					ok, err = CheckRespContentLength(url)
 					if err != nil {
 						cancel()
@@ -118,7 +117,7 @@ func (c *Client) GetHeaders(ctx context.Context, url string) error {
 							logrus.Errorln("cannot send tg message about content-length")
 						}
 					}
-				}
+				}*/
 
 				m[url] = resp
 
