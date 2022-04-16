@@ -34,7 +34,7 @@ func main() {
 
 	log.Println("Service started...")
 
-	client := client2.NewClient(log, bot)
+	client := client2.NewClient(log, bot, cfg)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	var wg sync.WaitGroup

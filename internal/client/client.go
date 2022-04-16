@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"site_monitoring/internal/model"
 	"site_monitoring/internal/notification"
+	"site_monitoring/sitemon/config"
 	"strings"
 	"sync"
 	"time"
@@ -20,15 +21,17 @@ type Client struct {
 	C           http.Client
 	Notificator notification.Notificator
 	Logger      *logrus.Logger
+	Cfg         *config.Config
 }
 
-func NewClient(log *logrus.Logger, notificator notification.Notificator) *Client {
+func NewClient(log *logrus.Logger, notificator notification.Notificator, cfg *config.Config) *Client {
 	return &Client{
 		C: http.Client{
 			Timeout: 30 * time.Second,
 		},
 		Logger:      log,
 		Notificator: notificator,
+		Cfg:         cfg,
 	}
 }
 
@@ -40,7 +43,7 @@ func (c *Client) GetHeaders(ctx context.Context, url string, wg *sync.WaitGroup)
 		}()
 
 		c.Logger.Infoln("Start checking ", url)
-		ticker := time.NewTicker(5 * time.Second)
+		ticker := time.NewTicker(c.Cfg.Timing.Delay)
 
 		resp := model.NewResp()
 
@@ -155,7 +158,7 @@ func (c *Client) Do(ctx context.Context, cancel context.CancelFunc, url string, 
 			resp.OldResponseCode = resp.ResponseCode
 		}
 
-		err = c.Notificator.SendMessage(fmt.Sprint("Server status not ", http.StatusOK, " in url: ", url,
+		err = c.Notificator.SendMessage(fmt.Sprint("Server down. Status ", resp.ResponseCode, " in url: ", url,
 			" at ", time.Now().Format("2006-01-02 15:04:05")))
 		if err != nil {
 			logrus.Errorln("cannot send tg message about server status")

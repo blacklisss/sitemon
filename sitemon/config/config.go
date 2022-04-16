@@ -6,12 +6,16 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/namsral/flag"
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
+	Timing struct {
+		Delay time.Duration `yaml:"delay" json:"delay"`
+	} `yaml:"timing" json:"timing"`
 	Notification struct {
 		BotAPI string `yaml:"BotAPI" json:"BotAPI"`
 		ChatID int64  `yaml:"ChatID" json:"ChatID"`

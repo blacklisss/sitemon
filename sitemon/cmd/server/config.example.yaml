@@ -1,3 +1,5 @@
+timing:
+  delay: "15s"
 notification:
   BotAPI: ""
   ChatId: 12345
