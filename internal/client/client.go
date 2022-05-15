@@ -151,20 +151,26 @@ func (c *Client) Do(ctx context.Context, cancel context.CancelFunc, url string, 
 		return
 	}
 
-	if !ok && resp.OldResponseCode != resp.ResponseCode {
+	if !ok && (resp.OldResponseCode != resp.ResponseCode || resp.ErrorCount > 0) {
 		if res != nil {
 			resp.OldResponseCode = res.StatusCode
 		} else {
 			resp.OldResponseCode = resp.ResponseCode
 		}
+		resp.ErrorCount++
+		logrus.Warnln(resp.ErrorCount)
 
-		err = c.Notificator.SendMessage(fmt.Sprint("Server down. Status ", resp.ResponseCode, " in url: ", url,
-			" at ", time.Now().Format("2006-01-02 15:04:05")))
-		if err != nil {
-			logrus.Errorln("cannot send tg message about server status")
+		if resp.ErrorCount == 3 {
+			err = c.Notificator.SendMessage(fmt.Sprint("Server down. Status ", resp.ResponseCode, " in url: ", url,
+				" at ", time.Now().Format("2006-01-02 15:04:05")))
+			if err != nil {
+				logrus.Errorln("cannot send tg message about server status")
+			}
 		}
+
 	} else if resp.OldResponseCode != resp.ResponseCode {
 		resp.OldResponseCode = res.StatusCode
+		resp.ErrorCount = 0
 		err = c.Notificator.SendMessage(fmt.Sprint("Server started up in url: ", url,
 			" at ", time.Now().Format("2006-01-02 15:04:05")))
 		if err != nil {
@@ -186,6 +192,7 @@ func (c *Client) Do(ctx context.Context, cancel context.CancelFunc, url string, 
 			}
 		}
 	}*/
+
 	c.Lock()
 	m[url] = resp
 	c.Unlock()

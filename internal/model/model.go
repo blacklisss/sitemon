@@ -7,6 +7,7 @@ type Resp struct {
 	OldResponseCode  int
 	ContentLength    int64
 	OldContentLength int64
+	ErrorCount       uint
 }
 
 func NewResp() *Resp {
@@ -15,5 +16,6 @@ func NewResp() *Resp {
 		OldResponseCode:  http.StatusOK,
 		ContentLength:    -1,
 		OldContentLength: -1,
+		ErrorCount:       0,
 	}
 }
