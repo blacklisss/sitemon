@@ -170,12 +170,15 @@ func (c *Client) Do(ctx context.Context, cancel context.CancelFunc, url string, 
 
 	} else if resp.OldResponseCode != resp.ResponseCode {
 		resp.OldResponseCode = res.StatusCode
-		resp.ErrorCount = 0
-		err = c.Notificator.SendMessage(fmt.Sprint("Server started up in url: ", url,
-			" at ", time.Now().Format("2006-01-02 15:04:05")))
-		if err != nil {
-			logrus.Errorln("cannot send tg message about server status")
+
+		if resp.ErrorCount > 2 {
+			err = c.Notificator.SendMessage(fmt.Sprint("Server started up in url: ", url,
+				" at ", time.Now().Format("2006-01-02 15:04:05")))
+			if err != nil {
+				logrus.Errorln("cannot send tg message about server status")
+			}
 		}
+		resp.ErrorCount = 0
 	} /*else if ok {
 		ok, err = CheckRespContentLength(url)
 		if err != nil {

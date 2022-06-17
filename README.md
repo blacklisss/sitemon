@@ -6,7 +6,7 @@
 
 Пример yaml смотри в sitemom/cmd/server/config.example.yaml
 
-По умолчанию исполуется файл с именем config.yaml
+По умолчанию используется файл с именем config.yaml
 Поведение по умолчанию можно изменить с помощью флага config
 go run ./... config="config.json"
 
