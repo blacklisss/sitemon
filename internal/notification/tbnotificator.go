@@ -1,6 +1,8 @@
 package notification
 
 import (
+	"context"
+	"fmt"
 	"site_monitoring/sitemon/config"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -38,4 +40,36 @@ func NewTgBOT(cfg *config.Config, log *logrus.Logger) (*TgBOT, error) {
 		log:    log,
 		chatID: cfg.Notification.ChatID,
 	}, nil
+}
+
+func (b *TgBOT) Run(ctx context.Context) {
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 60
+
+	updates := b.bot.GetUpdatesChan(u)
+
+	for {
+		select {
+		case update, ok := <-updates:
+			if !ok {
+				return
+			}
+			if update.Message == nil { // ignore any non-Message Updates
+				continue
+			}
+
+			b.log.Infof("Received message from %s: %s", update.Message.From.UserName, update.Message.Text)
+
+			if update.Message.Text == "/myid" {
+				response := fmt.Sprintf("Your Chat ID is: %d", update.Message.Chat.ID)
+				msg := tgbotapi.NewMessage(update.Message.Chat.ID, response)
+				if _, err := b.bot.Send(msg); err != nil {
+					b.log.Errorln(err)
+				}
+			}
+		case <-ctx.Done():
+			b.log.Infoln("Bot stopping due to context cancellation")
+			return
+		}
+	}
 }

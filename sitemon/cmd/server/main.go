@@ -16,6 +16,8 @@ import (
 var log = logrus.New()
 
 func main() {
+	log.Level = logrus.WarnLevel
+
 	cfgPath, err := config.ParseFlags()
 
 	if err != nil {
@@ -37,6 +39,11 @@ func main() {
 	client := client2.NewClient(log, bot, cfg)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+
+	go func() {
+		bot.Run(ctx)
+	}()
+
 	var wg sync.WaitGroup
 
 	for _, d := range cfg.Domains {
@@ -47,6 +54,8 @@ func main() {
 	}
 
 	<-ctx.Done()
+
+	bot.SendMessage("Service down...")
 	cancel()
 
 	wg.Wait()
