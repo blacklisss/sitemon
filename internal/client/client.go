@@ -14,11 +14,16 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+//go:generate go run github.com/vektra/mockery/v2@v2.35.2 --name=HttpClient
+type HttpClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
 var m = make(map[string]*model.Resp)
 
 type Client struct {
 	sync.RWMutex
-	C           http.Client
+	C           HttpClient
 	Notificator notification.Notificator
 	Logger      *logrus.Logger
 	Cfg         *config.Config
@@ -26,7 +31,7 @@ type Client struct {
 
 func NewClient(log *logrus.Logger, notificator notification.Notificator, cfg *config.Config) *Client {
 	return &Client{
-		C: http.Client{
+		C: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 		Logger:      log,
@@ -126,18 +131,6 @@ func (c *Client) Do(ctx context.Context, cancel context.CancelFunc, url string, 
 		resp.ContentLength = 0
 	} else {
 		resp.ResponseCode = res.StatusCode
-		/*b, err := io.Copy(io.Discard, res.Body)
-		if err != nil {
-			cancel()
-			c.Logger.Errorln("cannot get content-length")
-			continue
-		}
-		err = res.Body.Close()
-		if err != nil {
-			cancel()
-			c.Logger.Fatalln("cannot close resp.Body")
-		}
-		resp.ContentLength = b*/
 	}
 
 	c.Lock()
@@ -179,22 +172,7 @@ func (c *Client) Do(ctx context.Context, cancel context.CancelFunc, url string, 
 			}
 		}
 		resp.ErrorCount = 0
-	} /*else if ok {
-		ok, err = CheckRespContentLength(url)
-		if err != nil {
-			cancel()
-			c.Logger.Errorln(err)
-			continue
-		}
-
-		if !ok {
-			err = c.Notificator.SendMessage(fmt.Sprint("Content-Length was changed in url: ", url,
-				" at ", time.Now().Format("2006-01-02 15:04:05")))
-			if err != nil {
-				logrus.Errorln("cannot send tg message about content-length")
-			}
-		}
-	}*/
+	}
 
 	c.Lock()
 	m[url] = resp

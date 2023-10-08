@@ -28,7 +28,7 @@ func Load(configFile string) (config *Config, err error) {
 
 	switch filepath.Ext(configFile) {
 	case ".json":
-		if err = LoadJSONConfig(&configFile, config); err != nil { // ST1003: func LoadJsonConfig should be LoadJSONConfig (stylecheck)
+		if err = LoadJSONConfig(&configFile, config); err != nil {
 			return
 		}
 	case ".yaml":
@@ -51,7 +51,7 @@ func LoadJSONConfig(configFile *string, config *Config) error {
 
 	err = json.Unmarshal(contents, config)
 	if err != nil {
-		return fmt.Errorf("invalid json: %s", err) //  ST1005: error strings should not end with punctuation or a newline (stylecheck)
+		return fmt.Errorf("invalid json: %s", err)
 	}
 
 	if !validateURL(config.Domains) {
@@ -81,22 +81,16 @@ func LoadYamlConfig(configFile *string, config *Config) error {
 }
 
 func ParseFlags() (string, error) {
-	// String that contains the configured configuration path
 	var configPath string
 
-	// Set up a CLI flag called "-config" to allow users
-	// to supply the configuration file
 	flag.StringVar(&configPath, "config-file", "./config.yaml", "path to config file")
 
-	// Actually parse the flags
 	flag.Parse()
 
-	// Validate the path first
 	if err := ValidateConfigPath(configPath); err != nil {
 		return "", err
 	}
 
-	// Return the configuration path
 	return configPath, nil
 }
 
@@ -111,12 +105,12 @@ func ValidateConfigPath(path string) error {
 	return nil
 }
 
-func isURL(str string) bool { // ST1003: func isUrl should be isURL (stylecheck)
+func isURL(str string) bool {
 	u, err := url.Parse(str)
 	return err == nil && u.Scheme != "" && u.Host != ""
 }
 
-func validateURL(domains []string) bool { // importShadow: shadow of imported package 'url' (gocritic)
+func validateURL(domains []string) bool {
 	for _, d := range domains {
 		if !isURL(d) {
 			return false

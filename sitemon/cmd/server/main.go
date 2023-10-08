@@ -55,7 +55,10 @@ func main() {
 
 	<-ctx.Done()
 
-	bot.SendMessage("Service down...")
+	err = bot.SendMessage("Service down...")
+	if err != nil {
+		log.Errorln("can't send shutdown message to thr bot...")
+	}
 	cancel()
 
 	wg.Wait()
