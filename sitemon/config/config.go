@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -20,7 +21,51 @@ type Config struct {
 		BotAPI string `yaml:"BotAPI" json:"BotAPI"`
 		ChatID int64  `yaml:"ChatID" json:"ChatID"`
 	} `yaml:"notification" json:"Notification"`
-	Domains []string `yaml:"domains" json:"domains"`
+	Domains []Domain `yaml:"domains" json:"domains"`
+}
+
+type Domain struct {
+	URL                          string `yaml:"url" json:"url"`
+	CertificateExpiryWarningDays int    `yaml:"certificateExpiryWarningDays" json:"certificateExpiryWarningDays"`
+}
+
+func (d *Domain) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		d.URL = value.Value
+		d.CertificateExpiryWarningDays = 0
+		return nil
+	}
+
+	type rawDomain Domain
+	var raw rawDomain
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+
+	*d = Domain(raw)
+
+	return nil
+}
+
+func (d *Domain) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return nil
+	}
+
+	if trimmed[0] == '"' {
+		return json.Unmarshal(trimmed, &d.URL)
+	}
+
+	type rawDomain Domain
+	var raw rawDomain
+	if err := json.Unmarshal(trimmed, &raw); err != nil {
+		return err
+	}
+
+	*d = Domain(raw)
+
+	return nil
 }
 
 func Load(configFile string) (config *Config, err error) {
@@ -116,9 +161,12 @@ func isURL(str string) bool { // ST1003: func isUrl should be isURL (stylecheck)
 	return err == nil && u.Scheme != "" && u.Host != ""
 }
 
-func validateURL(domains []string) bool { // importShadow: shadow of imported package 'url' (gocritic)
+func validateURL(domains []Domain) bool { // importShadow: shadow of imported package 'url' (gocritic)
 	for _, d := range domains {
-		if !isURL(d) {
+		if !isURL(d.URL) {
+			return false
+		}
+		if d.CertificateExpiryWarningDays < 0 {
 			return false
 		}
 	}

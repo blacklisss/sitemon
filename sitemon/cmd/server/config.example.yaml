@@ -2,7 +2,8 @@ timing:
   delay: "15s"
 notification:
   BotAPI: ""
-  ChatId: 12345
+  ChatID: 12345
 domains:
-  - https://example.com
+  - url: https://example.com
+    certificateExpiryWarningDays: 10
   - https://example.ru

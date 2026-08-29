@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
-	client2 "site_monitoring/internal/client"
-	"site_monitoring/internal/notification"
+	"time"
+
+	"site_monitoring/internal/application/monitor"
+	"site_monitoring/internal/infrastructure/httpcheck"
+	"site_monitoring/internal/infrastructure/telegram"
 	"site_monitoring/sitemon/config"
-	"sync"
 
 	"github.com/sirupsen/logrus"
 )
@@ -17,7 +18,6 @@ var log = logrus.New()
 
 func main() {
 	cfgPath, err := config.ParseFlags()
-
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -27,31 +27,29 @@ func main() {
 		log.Fatal(err)
 	}
 
-	bot, err := notification.NewTgBOT(cfg, log)
+	notifier, err := telegram.NewNotifier(cfg.Notification.BotAPI, cfg.Notification.ChatID, log)
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	log.Println("Service started...")
-
-	client := client2.NewClient(log, bot, cfg)
-
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	var wg sync.WaitGroup
-
-	for _, d := range cfg.Domains {
-		wg.Add(1)
-		if err := client.GetHeaders(ctx, d, &wg); err != nil {
-			log.Fatalln(err)
+	checker := httpcheck.NewChecker(30 * time.Second)
+	service := monitor.NewService(checker, notifier, log, cfg.Timing.Delay)
+	targets := make([]monitor.Target, 0, len(cfg.Domains))
+	for _, domain := range cfg.Domains {
+		target := monitor.Target{URL: domain.URL}
+		if domain.CertificateExpiryWarningDays > 0 {
+			target.CertificateExpiryAlertThreshold = time.Duration(domain.CertificateExpiryWarningDays) * 24 * time.Hour
 		}
+		targets = append(targets, target)
 	}
 
-	<-ctx.Done()
-	cancel()
+	log.Println("Service started...")
 
-	wg.Wait()
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
 
-	fmt.Println("")
+	service.Run(ctx, targets)
+	_ = notifier.SendMessage("Service down...")
+
 	log.Println("Service stopped...")
-
 }
