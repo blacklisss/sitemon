@@ -24,6 +24,9 @@ func TestStatus_ThirdFailureEmitsDownEvent(t *testing.T) {
 	if event.Text == "" {
 		t.Fatal("expected down event text")
 	}
+	if !st.IsDown {
+		t.Fatal("expected status to be marked down")
+	}
 }
 
 func TestStatus_RecoveryAfterFailuresEmitsRecoveredEvent(t *testing.T) {
@@ -44,6 +47,9 @@ func TestStatus_RecoveryAfterFailuresEmitsRecoveredEvent(t *testing.T) {
 	if st.ErrorCount != 0 {
 		t.Fatalf("expected error count reset, got %d", st.ErrorCount)
 	}
+	if st.IsDown {
+		t.Fatal("expected status to be marked recovered")
+	}
 }
 
 func TestStatus_FirstHealthyCheckProducesNoEvent(t *testing.T) {
@@ -56,6 +62,23 @@ func TestStatus_FirstHealthyCheckProducesNoEvent(t *testing.T) {
 	}
 	if st.ErrorCount != 0 {
 		t.Fatalf("expected zero errors, got %d", st.ErrorCount)
+	}
+}
+
+func TestStatus_NonHealthyStatusChangeAfterDownDoesNotRecover(t *testing.T) {
+	st := NewStatus("https://example.com")
+	now := time.Date(2026, 3, 6, 12, 0, 0, 0, time.UTC)
+
+	for i := 0; i < FailureThreshold; i++ {
+		_ = st.ApplyResponse(http.StatusInternalServerError, now)
+	}
+
+	event := st.ApplyResponse(http.StatusBadGateway, now.Add(time.Minute))
+	if event.Type != EventNone {
+		t.Fatalf("ApplyResponse(502 after down) = %s, want %s", event.Type, EventNone)
+	}
+	if !st.IsDown {
+		t.Fatal("expected status to remain down")
 	}
 }
 

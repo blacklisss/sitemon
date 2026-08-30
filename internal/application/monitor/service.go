@@ -2,8 +2,10 @@ package monitor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/url"
+	"os"
 	"sync"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 )
 
 const DefaultCertificateExpiryAlertThreshold = 10 * 24 * time.Hour
+const requestTimeout = 30 * time.Second
 
 type Target struct {
 	URL                             string
@@ -33,8 +36,9 @@ type Service struct {
 	logger   *logrus.Logger
 	delay    time.Duration
 
-	mu     sync.Mutex
-	states map[string]*site.Status
+	mu        sync.Mutex
+	states    map[string]*site.Status
+	stateFile string
 }
 
 func NewService(checker Checker, notifier Notifier, logger *logrus.Logger, delay time.Duration) *Service {
@@ -45,6 +49,29 @@ func NewService(checker Checker, notifier Notifier, logger *logrus.Logger, delay
 		delay:    delay,
 		states:   make(map[string]*site.Status),
 	}
+}
+
+func (s *Service) UseStateFile(path string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.stateFile = path
+
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	states := make(map[string]*site.Status)
+	if err := json.Unmarshal(data, &states); err != nil {
+		return err
+	}
+	s.states = states
+
+	return nil
 }
 
 func (s *Service) Run(ctx context.Context, targets []Target) {
@@ -84,7 +111,7 @@ func (s *Service) monitorDomain(ctx context.Context, target Target) {
 func (s *Service) checkOnce(ctx context.Context, target Target, at time.Time) {
 	s.logger.Infof("Checking %s at %s\n", target.URL, at)
 
-	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	requestCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
 	result, err := s.checker.Check(requestCtx, target.URL)
@@ -96,15 +123,29 @@ func (s *Service) checkOnce(ctx context.Context, target Target, at time.Time) {
 		result.ResponseCode = site.FailureCode
 	}
 
-	st := s.getOrCreateState(target.URL)
+	s.mu.Lock()
+	st := s.getOrCreateStateLocked(target.URL)
 	events := []site.Event{st.ApplyResponse(result.ResponseCode, at)}
 
 	if isHTTPSURL(target.URL) {
 		events = append(events, st.ApplyCertificateExpiry(result.CertificateNotAfter, at, target.certificateExpiryAlertThreshold()))
 	}
+	if err := s.saveStatesLocked(); err != nil {
+		s.logger.Errorln("cannot save monitor state:", err.Error())
+	}
+	s.mu.Unlock()
 
 	for _, event := range events {
 		if event.Type == site.EventNone || event.Text == "" {
+			continue
+		}
+		if event.Type == site.EventDown && !s.confirmFailure(ctx, target.URL) {
+			s.mu.Lock()
+			_ = st.ApplyResponse(site.HealthyResponseCode, at)
+			if err := s.saveStatesLocked(); err != nil {
+				s.logger.Errorln("cannot save monitor state:", err.Error())
+			}
+			s.mu.Unlock()
 			continue
 		}
 
@@ -114,10 +155,30 @@ func (s *Service) checkOnce(ctx context.Context, target Target, at time.Time) {
 	}
 }
 
+func (s *Service) confirmFailure(ctx context.Context, url string) bool {
+	requestCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	result, err := s.checker.Check(requestCtx, url)
+	if err != nil {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return false
+		}
+		s.logger.Errorln("cannot confirm failure:", err.Error())
+		return true
+	}
+
+	return result.ResponseCode != site.HealthyResponseCode
+}
+
 func (s *Service) getOrCreateState(url string) *site.Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	return s.getOrCreateStateLocked(url)
+}
+
+func (s *Service) getOrCreateStateLocked(url string) *site.Status {
 	if current, ok := s.states[url]; ok {
 		return current
 	}
@@ -126,6 +187,24 @@ func (s *Service) getOrCreateState(url string) *site.Status {
 	s.states[url] = st
 
 	return st
+}
+
+func (s *Service) saveStatesLocked() error {
+	if s.stateFile == "" {
+		return nil
+	}
+
+	data, err := json.MarshalIndent(s.states, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	tmpFile := s.stateFile + ".tmp"
+	if err := os.WriteFile(tmpFile, data, 0600); err != nil {
+		return err
+	}
+
+	return os.Rename(tmpFile, s.stateFile)
 }
 
 func (t Target) certificateExpiryAlertThreshold() time.Duration {
