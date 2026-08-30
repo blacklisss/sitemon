@@ -2,6 +2,9 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -74,5 +77,17 @@ func TestConfigUnmarshalJSONAcceptsObjectDomains(t *testing.T) {
 func TestValidateURLRejectsNegativeCertificateWarningDays(t *testing.T) {
 	if validateURL([]Domain{{URL: "https://example.com", CertificateExpiryWarningDays: -1}}) {
 		t.Fatal("expected validation failure")
+	}
+}
+
+func TestLoadMissingConfigReturnsError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.yaml")
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatalf("Load(%q) = nil, want error", path)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Load(%q) = %v, want os.ErrNotExist", path, err)
 	}
 }

@@ -38,9 +38,10 @@ type Status struct {
 	ResponseCode    int
 	OldResponseCode int
 	ErrorCount      uint
+	IsDown          bool
 
-	lastCertificateNotAfter time.Time
-	certificateAlertSent    bool
+	LastCertificateNotAfter time.Time
+	CertificateAlertSent    bool
 }
 
 func NewStatus(url string) *Status {
@@ -60,6 +61,7 @@ func (s *Status) ApplyResponse(code int, at time.Time) Event {
 		s.ErrorCount++
 
 		if s.ErrorCount == FailureThreshold {
+			s.IsDown = true
 			return Event{
 				Type: EventDown,
 				Text: fmt.Sprintf("Server down. Status %d in url: %s at %s", s.ResponseCode, s.URL, at.Format("2006-01-02 15:04:05")),
@@ -72,12 +74,13 @@ func (s *Status) ApplyResponse(code int, at time.Time) Event {
 	if s.OldResponseCode != s.ResponseCode {
 		s.OldResponseCode = s.ResponseCode
 
-		if s.ErrorCount >= FailureThreshold {
-			event := Event{Type: EventRecovered}
-			if s.ResponseCode == HealthyResponseCode {
-				event.Text = fmt.Sprintf("Server started up in url: %s at %s", s.URL, at.Format("2006-01-02 15:04:05"))
+		if s.IsDown && s.ResponseCode == HealthyResponseCode {
+			event := Event{
+				Type: EventRecovered,
+				Text: fmt.Sprintf("Server started up in url: %s at %s", s.URL, at.Format("2006-01-02 15:04:05")),
 			}
 			s.ErrorCount = 0
+			s.IsDown = false
 			return event
 		}
 
@@ -92,21 +95,21 @@ func (s *Status) ApplyCertificateExpiry(notAfter *time.Time, at time.Time, thres
 		return Event{Type: EventNone}
 	}
 
-	if s.lastCertificateNotAfter.IsZero() || !s.lastCertificateNotAfter.Equal(*notAfter) {
-		s.lastCertificateNotAfter = *notAfter
-		s.certificateAlertSent = false
+	if s.LastCertificateNotAfter.IsZero() || !s.LastCertificateNotAfter.Equal(*notAfter) {
+		s.LastCertificateNotAfter = *notAfter
+		s.CertificateAlertSent = false
 	}
 
 	if notAfter.Sub(at) > threshold {
-		s.certificateAlertSent = false
+		s.CertificateAlertSent = false
 		return Event{Type: EventNone}
 	}
 
-	if s.certificateAlertSent {
+	if s.CertificateAlertSent {
 		return Event{Type: EventNone}
 	}
 
-	s.certificateAlertSent = true
+	s.CertificateAlertSent = true
 
 	if !notAfter.After(at) {
 		return Event{

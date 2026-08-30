@@ -90,8 +90,7 @@ func Load(configFile string) (config *Config, err error) {
 func LoadJSONConfig(configFile *string, config *Config) error {
 	contents, err := os.ReadFile(*configFile)
 	if err != nil {
-		fmt.Printf("Error read config file: %s\n", err)
-		os.Exit(1)
+		return fmt.Errorf("read config file %q: %w", *configFile, err)
 	}
 
 	err = json.Unmarshal(contents, config)
@@ -109,8 +108,7 @@ func LoadJSONConfig(configFile *string, config *Config) error {
 func LoadYamlConfig(configFile *string, config *Config) error {
 	contents, err := os.ReadFile(*configFile)
 	if err != nil {
-		fmt.Printf("Error read config file: %s\n", err)
-		os.Exit(1)
+		return fmt.Errorf("read config file %q: %w", *configFile, err)
 	}
 
 	err = yaml.Unmarshal(contents, config)

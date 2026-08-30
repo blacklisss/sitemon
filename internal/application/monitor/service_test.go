@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -72,6 +73,7 @@ func TestService_CheckOnceSendsDownOnThirdFailure(t *testing.T) {
 		{ResponseCode: http.StatusInternalServerError},
 		{ResponseCode: http.StatusInternalServerError},
 		{ResponseCode: http.StatusInternalServerError},
+		{ResponseCode: http.StatusInternalServerError},
 	}}
 	notifier := &stubNotifier{}
 	logger := logrus.New()
@@ -91,8 +93,34 @@ func TestService_CheckOnceSendsDownOnThirdFailure(t *testing.T) {
 	}
 }
 
+func TestService_CheckOnceSuppressesDownWhenConfirmationIsHealthy(t *testing.T) {
+	checker := &stubChecker{results: []site.CheckResult{
+		{ResponseCode: http.StatusInternalServerError},
+		{ResponseCode: http.StatusInternalServerError},
+		{ResponseCode: http.StatusInternalServerError},
+		{ResponseCode: http.StatusOK},
+	}}
+	notifier := &stubNotifier{}
+	logger := logrus.New()
+	logger.SetLevel(logrus.PanicLevel)
+
+	svc := NewService(checker, notifier, logger, time.Millisecond)
+	ctx := context.Background()
+	now := time.Date(2026, 3, 6, 12, 0, 0, 0, time.UTC)
+	target := Target{URL: "https://example.com"}
+
+	svc.checkOnce(ctx, target, now)
+	svc.checkOnce(ctx, target, now.Add(time.Minute))
+	svc.checkOnce(ctx, target, now.Add(2*time.Minute))
+
+	if got := notifier.count(); got != 0 {
+		t.Fatalf("CheckOnce(recovered on confirmation) sent %d notifications, want 0", got)
+	}
+}
+
 func TestService_CheckOnceSendsRecoveryAfterDown(t *testing.T) {
 	checker := &stubChecker{results: []site.CheckResult{
+		{ResponseCode: http.StatusInternalServerError},
 		{ResponseCode: http.StatusInternalServerError},
 		{ResponseCode: http.StatusInternalServerError},
 		{ResponseCode: http.StatusInternalServerError},
@@ -117,14 +145,131 @@ func TestService_CheckOnceSendsRecoveryAfterDown(t *testing.T) {
 	}
 }
 
+func TestService_CheckOnceSendsRecoveryAfterRestart(t *testing.T) {
+	stateFile := t.TempDir() + "/state.json"
+	now := time.Date(2026, 3, 6, 12, 0, 0, 0, time.UTC)
+	target := Target{URL: "https://example.com"}
+
+	firstChecker := &stubChecker{results: []site.CheckResult{
+		{ResponseCode: http.StatusInternalServerError},
+		{ResponseCode: http.StatusInternalServerError},
+		{ResponseCode: http.StatusInternalServerError},
+		{ResponseCode: http.StatusInternalServerError},
+	}}
+	firstNotifier := &stubNotifier{}
+	logger := logrus.New()
+	logger.SetLevel(logrus.PanicLevel)
+
+	firstSvc := NewService(firstChecker, firstNotifier, logger, time.Millisecond)
+	if err := firstSvc.UseStateFile(stateFile); err != nil {
+		t.Fatalf("UseStateFile(%q) = %v, want nil", stateFile, err)
+	}
+
+	firstSvc.checkOnce(context.Background(), target, now)
+	firstSvc.checkOnce(context.Background(), target, now.Add(time.Minute))
+	firstSvc.checkOnce(context.Background(), target, now.Add(2*time.Minute))
+
+	secondChecker := &stubChecker{results: []site.CheckResult{{ResponseCode: http.StatusOK}}}
+	secondNotifier := &stubNotifier{}
+	secondSvc := NewService(secondChecker, secondNotifier, logger, time.Millisecond)
+	if err := secondSvc.UseStateFile(stateFile); err != nil {
+		t.Fatalf("UseStateFile(%q) after restart = %v, want nil", stateFile, err)
+	}
+
+	secondSvc.checkOnce(context.Background(), target, now.Add(3*time.Minute))
+
+	messages := secondNotifier.messagesCopy()
+	if got, want := len(messages), 1; got != want {
+		t.Fatalf("CheckOnce(recovery after restart) sent %d notifications, want %d", got, want)
+	}
+	if !strings.Contains(messages[0], "Server started up") {
+		t.Fatalf("CheckOnce(recovery after restart) message = %q, want Server started up", messages[0])
+	}
+}
+
+func TestService_CheckOnceDoesNotRewriteUnchangedState(t *testing.T) {
+	stateFile := t.TempDir() + "/state.json"
+	checker := &stubChecker{results: []site.CheckResult{
+		{ResponseCode: http.StatusOK},
+		{ResponseCode: http.StatusOK},
+	}}
+	notifier := &stubNotifier{}
+	logger := logrus.New()
+	logger.SetLevel(logrus.PanicLevel)
+
+	svc := NewService(checker, notifier, logger, time.Millisecond)
+	if err := svc.UseStateFile(stateFile); err != nil {
+		t.Fatalf("UseStateFile(%q) = %v, want nil", stateFile, err)
+	}
+
+	ctx := context.Background()
+	now := time.Date(2026, 3, 6, 12, 0, 0, 0, time.UTC)
+	target := Target{URL: "https://example.com"}
+
+	svc.checkOnce(ctx, target, now)
+	firstInfo, err := os.Stat(stateFile)
+	if err != nil {
+		t.Fatalf("Stat(%q) after first check = %v, want nil", stateFile, err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+	svc.checkOnce(ctx, target, now.Add(time.Minute))
+	secondInfo, err := os.Stat(stateFile)
+	if err != nil {
+		t.Fatalf("Stat(%q) after unchanged check = %v, want nil", stateFile, err)
+	}
+
+	if got, want := secondInfo.ModTime(), firstInfo.ModTime(); !got.Equal(want) {
+		t.Fatalf("state file modtime after unchanged check = %s, want %s", got, want)
+	}
+}
+
+func TestService_CheckOncePersistsCertificateAlertState(t *testing.T) {
+	stateFile := t.TempDir() + "/state.json"
+	now := time.Date(2026, 3, 6, 12, 0, 0, 0, time.UTC)
+	notAfter := now.Add(10 * 24 * time.Hour)
+	target := Target{URL: "https://example.com"}
+	logger := logrus.New()
+	logger.SetLevel(logrus.PanicLevel)
+
+	firstChecker := &stubChecker{results: []site.CheckResult{
+		{ResponseCode: http.StatusOK, CertificateNotAfter: &notAfter},
+	}}
+	firstNotifier := &stubNotifier{}
+	firstSvc := NewService(firstChecker, firstNotifier, logger, time.Millisecond)
+	if err := firstSvc.UseStateFile(stateFile); err != nil {
+		t.Fatalf("UseStateFile(%q) = %v, want nil", stateFile, err)
+	}
+
+	firstSvc.checkOnce(context.Background(), target, now)
+	if got, want := firstNotifier.count(), 1; got != want {
+		t.Fatalf("CheckOnce(first certificate warning) sent %d notifications, want %d", got, want)
+	}
+
+	secondChecker := &stubChecker{results: []site.CheckResult{
+		{ResponseCode: http.StatusOK, CertificateNotAfter: &notAfter},
+	}}
+	secondNotifier := &stubNotifier{}
+	secondSvc := NewService(secondChecker, secondNotifier, logger, time.Millisecond)
+	if err := secondSvc.UseStateFile(stateFile); err != nil {
+		t.Fatalf("UseStateFile(%q) after restart = %v, want nil", stateFile, err)
+	}
+
+	secondSvc.checkOnce(context.Background(), target, now.Add(time.Hour))
+	if got, want := secondNotifier.count(), 0; got != want {
+		t.Fatalf("CheckOnce(certificate warning after restart) sent %d notifications, want %d", got, want)
+	}
+}
+
 func TestService_CheckOnceMapsCheckerErrorToFailureCode(t *testing.T) {
 	checker := &stubChecker{
 		results: []site.CheckResult{
 			{ResponseCode: 0},
 			{ResponseCode: 0},
 			{ResponseCode: 0},
+			{ResponseCode: 0},
 		},
-		errs: []error{errors.New("network fail"), errors.New("network fail"), errors.New("network fail")},
+		errs: []error{errors.New("network fail"), errors.New("network fail"), errors.New("network fail"), errors.New("network fail")},
 	}
 	notifier := &stubNotifier{}
 	logger := logrus.New()
